@@ -71,6 +71,8 @@ nav:
       - User Stories: business-requirements/user-stories.md
   - Sprint Changelog:
       - sprint-changelog/index.md
+  - Projects:
+      - Prospects: projects/prospects.md
   - Runbooks:
       - runbooks/index.md
       - Deployment: runbooks/deployment.md
