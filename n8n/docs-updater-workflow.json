@@ -1,0 +1,272 @@
+{
+  "name": "DocsUpdater - Linear to Docs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linear.app/graphql",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"query\": \"query { cycles(filter: { isActive: { eq: true } }) { nodes { id name startsAt endsAt issues(filter: { state: { type: { in: [\\\"completed\\\", \\\"done\\\"] } } }) { nodes { id identifier title description labels { nodes { name } } state { name } assignee { name } completedAt } } } } }\"\n}",
+        "options": {}
+      },
+      "id": "fetch-linear-tickets",
+      "name": "Fetch Linear Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 100],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "LINEAR_CREDENTIALS_ID",
+          "name": "Linear API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Linear API response and map tickets to doc sections\nconst response = $input.first().json;\nconst cycles = response.data?.cycles?.nodes || [];\n\nif (cycles.length === 0) {\n  return [{ json: { skip: true, reason: 'No active cycle found' } }];\n}\n\nconst cycle = cycles[0];\nconst issues = cycle.issues?.nodes || [];\n\nif (issues.length === 0) {\n  return [{ json: { skip: true, reason: 'No completed issues in active cycle' } }];\n}\n\n// Map Linear labels to doc sections\nconst labelToSection = {\n  'api': 'docs/api-reference/endpoints.md',\n  'architecture': 'docs/architecture/system-design.md',\n  'frontend': 'docs/architecture/tech-stack.md',\n  'backend': 'docs/architecture/system-design.md',\n  'infrastructure': 'docs/architecture/tech-stack.md',\n  'business': 'docs/business-requirements/user-stories.md',\n  'requirements': 'docs/business-requirements/index.md',\n  'deployment': 'docs/runbooks/deployment.md',\n};\n\n// Determine which doc sections need updating\nconst affectedSections = new Set();\naffectedSections.add('docs/sprint-changelog/index.md'); // Always update changelog\n\nconst tickets = issues.map(issue => {\n  const labels = (issue.labels?.nodes || []).map(l => l.name.toLowerCase());\n  labels.forEach(label => {\n    if (labelToSection[label]) {\n      affectedSections.add(labelToSection[label]);\n    }\n  });\n\n  return {\n    identifier: issue.identifier,\n    title: issue.title,\n    description: issue.description || 'No description provided',\n    labels: labels,\n    assignee: issue.assignee?.name || 'Unassigned',\n    completedAt: issue.completedAt\n  };\n});\n\nreturn [{\n  json: {\n    skip: false,\n    sprintName: cycle.name,\n    sprintDateRange: `${cycle.startsAt?.split('T')[0]} to ${cycle.endsAt?.split('T')[0]}`,\n    tickets: tickets,\n    affectedSections: Array.from(affectedSections)\n  }\n}];"
+      },
+      "id": "process-linear-data",
+      "name": "Process Linear Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [550, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-has-tickets",
+      "name": "Has Tickets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [780, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch current doc files from GitHub API\nconst data = $input.first().json;\nconst sections = data.affectedSections;\nconst repo = '{{GITHUB_REPO}}'; // e.g., 'owner/repo'\nconst token = '{{GITHUB_TOKEN}}';\nconst branch = 'main';\n\nconst currentDocs = {};\n\nfor (const filePath of sections) {\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://api.github.com/repos/${repo}/contents/${filePath}?ref=${branch}`,\n      headers: {\n        'Authorization': `Bearer ${token}`,\n        'Accept': 'application/vnd.github.v3+json',\n        'User-Agent': 'DocsUpdater-n8n'\n      },\n      returnFullResponse: true\n    });\n\n    const body = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;\n    const content = Buffer.from(body.content, 'base64').toString('utf-8');\n    currentDocs[filePath] = {\n      content: content,\n      sha: body.sha\n    };\n  } catch (error) {\n    // File might not exist yet, skip it\n    console.log(`Could not fetch ${filePath}: ${error.message}`);\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    currentDocs: currentDocs\n  }\n}];"
+      },
+      "id": "fetch-current-docs",
+      "name": "Fetch Current Docs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 4096,\n  \"system\": \"You are a technical documentation updater. Your job is to incorporate completed sprint work into existing project documentation.\\n\\nRules:\\n1. Preserve existing structure and formatting. Add to sections, don't reorganize.\\n2. Don't remove correct content. Only add or update information.\\n3. For sprint-changelog/index.md: prepend a new entry below the heading and info box with sprint date range, summary, and bulleted list of completed items with ticket identifiers.\\n4. For technical docs: update relevant sections with specifics from ticket descriptions.\\n5. Only use information present in the tickets. Don't fabricate details.\\n6. Professional, concise, third-person, present tense.\\n7. Preserve admonitions, Mermaid diagrams, and Material for MkDocs syntax.\\n\\nRespond ONLY with valid JSON: { \\\"files\\\": { \\\"path\\\": \\\"full updated content\\\" }, \\\"summary\\\": \\\"what changed\\\" }\\nOnly include files that actually changed. If no updates needed: { \\\"files\\\": {}, \\\"summary\\\": \\\"reason\\\" }\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Sprint: {{ $json.sprintName }} ({{ $json.sprintDateRange }})\\n\\nCompleted Tickets:\\n{{ JSON.stringify($json.tickets, null, 2) }}\\n\\nCurrent Documentation Files:\\n{{ JSON.stringify(Object.fromEntries(Object.entries($json.currentDocs).map(([k, v]) => [k, v.content])), null, 2) }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "call-claude-api",
+      "name": "Call Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_CREDENTIALS_ID",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response and prepare files for GitHub PR\nconst input = $input.first().json;\nconst previousData = $('Fetch Current Docs').first().json;\n\n// Extract the text content from Claude's response\nconst content = input.content?.[0]?.text || input.content;\nlet parsed;\n\ntry {\n  // Handle potential markdown code fences in response\n  let jsonStr = typeof content === 'string' ? content : JSON.stringify(content);\n  jsonStr = jsonStr.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  parsed = JSON.parse(jsonStr);\n} catch (error) {\n  return [{ json: { error: `Failed to parse Claude response: ${error.message}`, raw: content } }];\n}\n\nif (!parsed.files || Object.keys(parsed.files).length === 0) {\n  return [{ json: { skip: true, summary: parsed.summary || 'No updates needed' } }];\n}\n\n// Prepare file updates with SHA for GitHub API\nconst fileUpdates = [];\nfor (const [path, newContent] of Object.entries(parsed.files)) {\n  // Security check: only allow docs/ paths\n  if (!path.startsWith('docs/')) {\n    console.log(`Skipping non-docs path: ${path}`);\n    continue;\n  }\n\n  const existingFile = previousData.currentDocs?.[path];\n  fileUpdates.push({\n    path: path,\n    content: newContent,\n    sha: existingFile?.sha || null,\n    isNew: !existingFile\n  });\n}\n\nreturn [{\n  json: {\n    skip: false,\n    fileUpdates: fileUpdates,\n    summary: parsed.summary,\n    sprintName: previousData.sprintName,\n    sprintDateRange: previousData.sprintDateRange\n  }\n}];"
+      },
+      "id": "parse-claude-response",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1550, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create a branch and PR on GitHub with the doc updates\nconst data = $input.first().json;\n\nif (data.skip) {\n  return [{ json: { result: 'skipped', reason: data.summary } }];\n}\n\nconst repo = '{{GITHUB_REPO}}';\nconst token = '{{GITHUB_TOKEN}}';\nconst baseBranch = 'main';\nconst timestamp = new Date().toISOString().split('T')[0];\nconst newBranch = `docs-update/${timestamp}`;\n\nconst headers = {\n  'Authorization': `Bearer ${token}`,\n  'Accept': 'application/vnd.github.v3+json',\n  'User-Agent': 'DocsUpdater-n8n'\n};\n\n// 1. Get the SHA of the base branch\nconst refResponse = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `https://api.github.com/repos/${repo}/git/ref/heads/${baseBranch}`,\n  headers\n});\nconst baseSha = refResponse.object.sha;\n\n// 2. Create the new branch\ntry {\n  await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.github.com/repos/${repo}/git/refs`,\n    headers,\n    body: {\n      ref: `refs/heads/${newBranch}`,\n      sha: baseSha\n    }\n  });\n} catch (error) {\n  // Branch might already exist, try with a suffix\n  const suffix = Math.random().toString(36).substring(2, 6);\n  const fallbackBranch = `docs-update/${timestamp}-${suffix}`;\n  await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.github.com/repos/${repo}/git/refs`,\n    headers,\n    body: {\n      ref: `refs/heads/${fallbackBranch}`,\n      sha: baseSha\n    }\n  });\n  // Use fallback branch name for the rest\n  data._branch = fallbackBranch;\n}\n\nconst branchName = data._branch || newBranch;\n\n// 3. Update each file on the new branch\nfor (const file of data.fileUpdates) {\n  const body = {\n    message: `docs: update ${file.path} from sprint ${data.sprintName}`,\n    content: Buffer.from(file.content, 'utf-8').toString('base64'),\n    branch: branchName\n  };\n  if (file.sha) {\n    body.sha = file.sha;\n  }\n\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url: `https://api.github.com/repos/${repo}/contents/${file.path}`,\n    headers,\n    body\n  });\n}\n\n// 4. Create the Pull Request\nconst prResponse = await this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api.github.com/repos/${repo}/pulls`,\n  headers,\n  body: {\n    title: `docs: auto-update from sprint ${data.sprintName}`,\n    body: `## Auto-Generated Documentation Update\\n\\n**Sprint:** ${data.sprintName} (${data.sprintDateRange})\\n\\n**Summary:** ${data.summary}\\n\\n---\\n*Generated by DocsUpdater n8n workflow*`,\n    head: branchName,\n    base: baseBranch\n  }\n});\n\nreturn [{\n  json: {\n    result: 'success',\n    prUrl: prResponse.html_url,\n    prNumber: prResponse.number,\n    branch: branchName,\n    filesUpdated: data.fileUpdates.length,\n    summary: data.summary\n  }\n}];"
+      },
+      "id": "create-github-pr",
+      "name": "Create GitHub PR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 0]
+    }
+  ],
+  "connections": {
+    "Daily Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Linear Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Linear Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Linear Tickets": {
+      "main": [
+        [
+          {
+            "node": "Process Linear Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Linear Data": {
+      "main": [
+        [
+          {
+            "node": "Has Tickets?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tickets?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Current Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Current Docs": {
+      "main": [
+        [
+          {
+            "node": "Call Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude API": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Create GitHub PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "documentation",
+      "id": "docs-tag"
+    }
+  ],
+  "meta": {
+    "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID"
+  }
+}
