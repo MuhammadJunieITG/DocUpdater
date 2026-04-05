@@ -176,17 +176,18 @@ If the logged-in user is a BDM and is assigned to the lead, the following CTAs a
 
 ## Converting a Lead to a Prospect
 
-When a BDM converts a Lead into a Prospect, the system opens the **Target Prospect Form**, a multi-tab, structured form used to enrich, validate, and qualify the potential dealer before submission and approval.
+Any user can convert a Lead into a Prospect. The system opens the **Target Prospect Form**, a multi-tab, structured form used to enrich, validate, and qualify the potential dealer before submission and approval.
 
 This form mirrors the Opportunity creation experience, using tabs and save-in-progress behavior.
 
 - Leads are not submitted directly
 - A Lead must first be converted into a Prospect
-- Conversion is performed by a BDM
+- Conversion can be performed by any user
+- Converted prospects require BDM approval to be ready
 
 ### Conversion Action
 
-1. BDM clicks **Convert to Prospect**
+1. User clicks **Convert to Prospect**
 2. The Side Panel shows the **Create Prospect** form
 3. Lead is transformed into a Prospect entity with a status of **Target**
 
@@ -197,10 +198,11 @@ This form mirrors the Opportunity creation experience, using tabs and save-in-pr
 | Lead | New |
 | Prospect | Target |
 
-**Target** indicates that the Prospect has been created but is not yet ready for final submission or approval.
+**Target** indicates that the Prospect has been created but is not yet ready for final submission or approval. The prospect will still require BDM approval to proceed to the ready state.
 
 ### Post-Conversion Behavior
 
 - Prospect now follows the Prospect lifecycle
 - Additional data can be captured
+- Prospect requires BDM approval to be ready
 - Prospect can later be submitted for approval
