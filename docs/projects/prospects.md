@@ -65,7 +65,7 @@ Free-text search across multiple criteria:
 
 Available filters:
 
-- Regions
+- Country
 - Sub-Regions
 - Stages
 - Created Date
@@ -183,7 +183,7 @@ This form mirrors the Opportunity creation experience, using tabs and save-in-pr
 - Leads are not submitted directly
 - A Lead must first be converted into a Prospect
 - Conversion can be performed by any user
-- Converted prospects require BDM approval to be ready
+- Converted prospects are placed in target stage and require BDM approval to be ready
 
 ### Conversion Action
 
