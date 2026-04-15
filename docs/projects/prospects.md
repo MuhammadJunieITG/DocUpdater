@@ -105,6 +105,8 @@ Pagination state is preserved when switching tabs.
 
 A **Lead** represents an early-stage potential dealer with minimal required information. Leads are created to capture opportunity quickly and can later be converted into Prospects once validated and ready for progression through approval.
 
+Any user can convert a lead into a prospect, which places the prospect in target stage and requires BDM approval to be ready.
+
 ### Creating a New Lead
 
 From the **Prospect List / Prospect Management Page**, the user clicks **New Lead**.
